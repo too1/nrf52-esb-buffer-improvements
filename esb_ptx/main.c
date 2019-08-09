@@ -78,6 +78,10 @@ void nrf_esb_event_handler(nrf_esb_evt_t const * p_event)
                 if (rx_payload.length > 0)
                 {
                     NRF_LOG_DEBUG("RX RECEIVED PAYLOAD");
+                    nrf_gpio_pin_write(LED_1, !(rx_payload.data[1]%8>0 && rx_payload.data[1]%8<=4));
+                    nrf_gpio_pin_write(LED_2, !(rx_payload.data[1]%8>1 && rx_payload.data[1]%8<=5));
+                    nrf_gpio_pin_write(LED_3, !(rx_payload.data[1]%8>2 && rx_payload.data[1]%8<=6));
+                    nrf_gpio_pin_write(LED_4, !(rx_payload.data[1]%8>3));
                 }
             }
             break;
@@ -117,7 +121,6 @@ uint32_t esb_init( void )
     nrf_esb_config.selective_auto_ack       = false;
 
     err_code = nrf_esb_init(&nrf_esb_config);
-
     VERIFY_SUCCESS(err_code);
 
     err_code = nrf_esb_set_base_address_0(base_addr_0);
@@ -159,10 +162,6 @@ int main(void)
         if (nrf_esb_write_payload(&tx_payload) == NRF_SUCCESS)
         {
             // Toggle one of the LEDs.
-            nrf_gpio_pin_write(LED_1, !(tx_payload.data[1]%8>0 && tx_payload.data[1]%8<=4));
-            nrf_gpio_pin_write(LED_2, !(tx_payload.data[1]%8>1 && tx_payload.data[1]%8<=5));
-            nrf_gpio_pin_write(LED_3, !(tx_payload.data[1]%8>2 && tx_payload.data[1]%8<=6));
-            nrf_gpio_pin_write(LED_4, !(tx_payload.data[1]%8>3));
             tx_payload.data[1]++;
         }
         else

@@ -57,6 +57,7 @@
 uint8_t led_nr;
 
 nrf_esb_payload_t rx_payload;
+volatile bool packet_received;
 
 /*lint -save -esym(40, BUTTON_1) -esym(40, BUTTON_2) -esym(40, BUTTON_3) -esym(40, BUTTON_4) -esym(40, LED_1) -esym(40, LED_2) -esym(40, LED_3) -esym(40, LED_4) */
 
@@ -81,6 +82,7 @@ void nrf_esb_event_handler(nrf_esb_evt_t const * p_event)
                 nrf_gpio_pin_write(LED_4, !(rx_payload.data[1]%8>3));
 
                 NRF_LOG_DEBUG("Receiving packet: %02x", rx_payload.data[1]);
+                packet_received = true;
             }
             break;
     }
@@ -135,6 +137,12 @@ uint32_t esb_init( void )
 int main(void)
 {
     uint32_t err_code;
+    static nrf_esb_payload_t ack_payload;
+    uint8_t counter;
+
+    ack_payload.pipe = 0;
+    ack_payload.length = 6;
+    for(int i = 0; i < 6; i++) ack_payload.data[i] = i + 0x10;
 
     gpio_init();
 
@@ -155,10 +163,16 @@ int main(void)
 
     while (true)
     {
-        if (NRF_LOG_PROCESS() == false)
+        while(NRF_LOG_PROCESS());
+        if(packet_received)
         {
-            __WFE();
+            packet_received = false;
+            ack_payload.data[1] = counter;
+            nrf_esb_write_payload(&ack_payload);
+            counter--;
         }
+        __WFE();
+        
     }
 }
 /*lint -restore */
