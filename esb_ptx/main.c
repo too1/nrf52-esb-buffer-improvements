@@ -64,20 +64,20 @@ void nrf_esb_event_handler(nrf_esb_evt_t const * p_event)
     switch (p_event->evt_id)
     {
         case NRF_ESB_EVENT_TX_SUCCESS:
-            NRF_LOG_DEBUG("TX SUCCESS EVENT");
+            NRF_LOG_INFO("TX SUCCESS EVENT");
             break;
         case NRF_ESB_EVENT_TX_FAILED:
-            NRF_LOG_DEBUG("TX FAILED EVENT");
+            NRF_LOG_INFO("TX FAILED EVENT");
             (void) nrf_esb_flush_tx();
             (void) nrf_esb_start_tx();
             break;
         case NRF_ESB_EVENT_RX_RECEIVED:
-            NRF_LOG_DEBUG("RX RECEIVED EVENT");
             while (nrf_esb_read_rx_payload(&rx_payload) == NRF_SUCCESS)
             {
                 if (rx_payload.length > 0)
                 {
-                    NRF_LOG_DEBUG("RX RECEIVED PAYLOAD");
+                    NRF_LOG_INFO("RX RECEIVED PAYLOAD %i", rx_payload.data[0]);
+                    NRF_LOG_HEXDUMP_INFO(rx_payload.data, rx_payload.length);
                     nrf_gpio_pin_write(LED_1, !(rx_payload.data[1]%8>0 && rx_payload.data[1]%8<=4));
                     nrf_gpio_pin_write(LED_2, !(rx_payload.data[1]%8>1 && rx_payload.data[1]%8<=5));
                     nrf_gpio_pin_write(LED_3, !(rx_payload.data[1]%8>2 && rx_payload.data[1]%8<=6));
@@ -97,11 +97,24 @@ void clocks_start( void )
     while (NRF_CLOCK->EVENTS_HFCLKSTARTED == 0);
 }
 
+static bool button_pressed(int index)
+{
+    static bool pressed_last[4] = {false, false, false, false};
+    bool pressed_now = nrf_gpio_pin_read(BUTTON_1 + index) == 0;
+    if(pressed_now && !pressed_last[index])
+    {
+        pressed_last[index] = true;
+        return true;
+    }
+    pressed_last[index] = pressed_now;
+    return false;
+}
 
 void gpio_init( void )
 {
     nrf_gpio_range_cfg_output(8, 15);
     bsp_board_init(BSP_INIT_LEDS);
+    nrf_gpio_range_cfg_input(BUTTON_1, BUTTON_4, NRF_GPIO_PIN_PULLUP);
 }
 
 
@@ -135,11 +148,12 @@ uint32_t esb_init( void )
     return err_code;
 }
 
-
+bool tx_active = true;
+uint32_t current_pipe = 0;
 int main(void)
 {
     ret_code_t err_code;
-
+    int tx_counter = 0;
     gpio_init();
 
     err_code = NRF_LOG_INIT(NULL);
@@ -156,20 +170,37 @@ int main(void)
 
     while (true)
     {
-        NRF_LOG_DEBUG("Transmitting packet %02x", tx_payload.data[1]);
-
-        tx_payload.noack = false;
-        if (nrf_esb_write_payload(&tx_payload) == NRF_SUCCESS)
+        if(tx_counter++ >= 25 && tx_active)
         {
-            // Toggle one of the LEDs.
-            tx_payload.data[1]++;
-        }
-        else
-        {
-            NRF_LOG_WARNING("Sending packet failed");
+            NRF_LOG_DEBUG("Transmitting packet %02x", tx_payload.data[1]);
+
+            tx_payload.noack = false;
+            tx_payload.pipe = current_pipe;
+            if (nrf_esb_write_payload(&tx_payload) == NRF_SUCCESS)
+            {
+                // Toggle one of the LEDs.
+                tx_payload.data[1]++;
+                for(int i = 2; i < 8; i++) tx_payload.data[i]--;
+            }
+            else
+            {
+                NRF_LOG_WARNING("Sending packet failed");
+            }
+            tx_counter = 0;
         }
 
-        nrf_delay_us(50000);
+        nrf_delay_us(10000);
+
+        if(button_pressed(0))
+        {
+            tx_active = !tx_active;
+            NRF_LOG_INFO(tx_active ? "TX On" : "TX Off");
+        }
+        if(button_pressed(1))
+        {
+            current_pipe = (current_pipe + 1) % 3;
+            NRF_LOG_INFO("Setting pipe to %i", current_pipe);
+        }
 
         while(NRF_LOG_PROCESS());
     }

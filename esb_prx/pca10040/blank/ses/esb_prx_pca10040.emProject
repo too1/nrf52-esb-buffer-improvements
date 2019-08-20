@@ -83,6 +83,7 @@
       <file file_name="../../../../libraries/nrf_esb_local/nrf_esb.c" />
     </folder>
     <configuration Connection="USB 682932572" Name="Release" />
+    <configuration Connection="USB 682281178" Name="Debug" />
   </project>
   <configuration
     Name="Release"

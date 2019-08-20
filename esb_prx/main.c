@@ -56,33 +56,44 @@
 
 uint8_t led_nr;
 
-nrf_esb_payload_t rx_payload;
+nrf_esb_payload_t rx_payload, ack_payload;
 volatile bool packet_received;
 
+bool rx_enabled = true;
+bool read_rx_payload_enabled = true;
+
 /*lint -save -esym(40, BUTTON_1) -esym(40, BUTTON_2) -esym(40, BUTTON_3) -esym(40, BUTTON_4) -esym(40, LED_1) -esym(40, LED_2) -esym(40, LED_3) -esym(40, LED_4) */
+
+static void read_rx_payloads(void)
+{
+    while(nrf_esb_read_rx_payload(&rx_payload) == NRF_SUCCESS)
+    {
+        // Set LEDs identical to the ones on the PTX.
+        nrf_gpio_pin_write(LED_1, !(rx_payload.data[1]%8>0 && rx_payload.data[1]%8<=4));
+        nrf_gpio_pin_write(LED_2, !(rx_payload.data[1]%8>1 && rx_payload.data[1]%8<=5));
+        nrf_gpio_pin_write(LED_3, !(rx_payload.data[1]%8>2 && rx_payload.data[1]%8<=6));
+        nrf_gpio_pin_write(LED_4, !(rx_payload.data[1]%8>3));
+        NRF_LOG_HEXDUMP_INFO(rx_payload.data, rx_payload.length);
+        //NRF_LOG_INFO("Receiving packet: %02x", rx_payload.data[1]);
+        packet_received = true;
+    }
+}
 
 void nrf_esb_event_handler(nrf_esb_evt_t const * p_event)
 {
     switch (p_event->evt_id)
     {
         case NRF_ESB_EVENT_TX_SUCCESS:
-            NRF_LOG_DEBUG("TX SUCCESS EVENT");
+            NRF_LOG_INFO("TX SUCCESS EVENT");
             break;
         case NRF_ESB_EVENT_TX_FAILED:
-            NRF_LOG_DEBUG("TX FAILED EVENT");
+            NRF_LOG_INFO("TX FAILED EVENT");
             break;
         case NRF_ESB_EVENT_RX_RECEIVED:
-            NRF_LOG_DEBUG("RX RECEIVED EVENT");
-            if (nrf_esb_read_rx_payload(&rx_payload) == NRF_SUCCESS)
+            NRF_LOG_INFO("RX RECEIVED EVENT");
+            if(read_rx_payload_enabled)
             {
-                // Set LEDs identical to the ones on the PTX.
-                nrf_gpio_pin_write(LED_1, !(rx_payload.data[1]%8>0 && rx_payload.data[1]%8<=4));
-                nrf_gpio_pin_write(LED_2, !(rx_payload.data[1]%8>1 && rx_payload.data[1]%8<=5));
-                nrf_gpio_pin_write(LED_3, !(rx_payload.data[1]%8>2 && rx_payload.data[1]%8<=6));
-                nrf_gpio_pin_write(LED_4, !(rx_payload.data[1]%8>3));
-
-                NRF_LOG_DEBUG("Receiving packet: %02x", rx_payload.data[1]);
-                packet_received = true;
+                read_rx_payloads();
             }
             break;
     }
@@ -133,12 +144,26 @@ uint32_t esb_init( void )
     return err_code;
 }
 
+static bool button_pressed(int index)
+{
+    static bool pressed_last[4] = {false, false, false, false};
+    bool pressed_now = nrf_gpio_pin_read(BUTTON_1 + index) == 0;
+    if(pressed_now && !pressed_last[index])
+    {
+        pressed_last[index] = true;
+        return true;
+    }
+    pressed_last[index] = pressed_now;
+    return false;
+}
 
 int main(void)
 {
     uint32_t err_code;
-    static nrf_esb_payload_t ack_payload;
     uint8_t counter;
+    uint8_t ack_pl_counter = 0;
+
+    nrf_gpio_range_cfg_input(BUTTON_1, BUTTON_4, NRF_GPIO_PIN_PULLUP);
 
     ack_payload.pipe = 0;
     ack_payload.length = 6;
@@ -164,14 +189,58 @@ int main(void)
     while (true)
     {
         while(NRF_LOG_PROCESS());
-        if(packet_received)
+        if(false)//packet_received)
         {
             packet_received = false;
             ack_payload.data[1] = counter;
             nrf_esb_write_payload(&ack_payload);
             counter--;
         }
-        __WFE();
+        if(button_pressed(0))
+        {
+            rx_enabled = !rx_enabled;
+            if(rx_enabled)
+            {
+                NRF_LOG_INFO("RX On");
+                APP_ERROR_CHECK(nrf_esb_start_rx());
+            }
+            else
+            {
+                NRF_LOG_INFO("RX Off");
+                APP_ERROR_CHECK(nrf_esb_stop_rx());
+            }
+        }
+        if(button_pressed(1))
+        {
+            read_rx_payload_enabled = !read_rx_payload_enabled;
+            if(read_rx_payload_enabled)
+            {
+                NRF_LOG_INFO("RX Read ON");
+                read_rx_payloads();
+            }
+            else
+            {
+                NRF_LOG_INFO("RX Read Off");
+            }
+        }
+        if(button_pressed(2))
+        {
+            static uint32_t pipe_counter = 0;
+            ack_payload.pipe = pipe_counter;
+            ack_payload.length = 8;
+            for(int i = 0; i < 8; i++) ack_payload.data[i] = ack_pl_counter;
+            if(nrf_esb_write_payload(&ack_payload) == 0)
+            {
+                NRF_LOG_INFO("Uploading ACK payload with counter %i on pipe %i", ack_pl_counter, pipe_counter);
+            }
+            else
+            {
+                NRF_LOG_INFO("ACK payload upload failed");
+            }
+            pipe_counter = (pipe_counter + 1) % 3;
+            ack_pl_counter++;
+        }
+        //__WFE();
         
     }
 }
